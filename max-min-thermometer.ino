@@ -7,6 +7,7 @@
 #include <LiquidCrystal_I2C.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
+#include <math.h>
 
 //Initialise the LCD
 LiquidCrystal_I2C      lcd(0x27, 20, 4);
@@ -14,6 +15,7 @@ Adafruit_BME280 bme; // I2C
 
 unsigned long delayTime;
 float preciseTemp;
+float precisePressure;
 int currentTemp;
 int currentHumidity;
 int currentPressure;
@@ -23,7 +25,7 @@ int hourMax[24];
 int hourMin[24];
 int dayMax[7];
 int dayMin[7];
-long barometer[36];  // 6 hours @ 10 minute intervals
+float barometer[36];  // 6 hours @ 10 minute intervals
 char trend03;
 char trend36;
 
@@ -45,10 +47,10 @@ uint8_t f2[8] = {0x0,0x0,0x0,0x10,0xa,0x6,0xe};
 //storm (>4mb fall in 3hr)
 uint8_t storm[8] = {0x10,0x18,0x8,0xd,0x5,0x3,0xf};
 
-char row1[20];
-char row2[20];
-char row3[20];
-char row4[20];
+char row1[21];
+char row2[21];
+char row3[21];
+char row4[21];
 
 void setup() {
     Serial.begin(9600);
@@ -90,13 +92,13 @@ void setup() {
       dayMax[ii] = currentTemp;
       dayMin[ii] = currentTemp; 
     }
-    long precisePressure = (long)bme.readPressure();
     for(ii=0; ii<36; ii++) {
       barometer[ii] = precisePressure;
     }
 
     trend03 = 5;
     trend36 = 2;
+    debug();
  }
 
 void loop() { 
@@ -105,12 +107,12 @@ void loop() {
     // row 1: display current temperature, pressure, humidity
     char tempBuf[6];
     dtostrf(preciseTemp, 5, 1, tempBuf);
-    sprintf(row1, "%5s%cC  %4u%c%c %3u%%", tempBuf, 223, currentPressure, trend36, trend03, currentHumidity);
+    snprintf(row1, 21, "%5s%cC  %4u%c%c %3u%%", tempBuf, 223, currentPressure, trend36, trend03, currentHumidity);
     lcd.setCursor(0,0);
     lcd.print(row1);
 
     // row 2: display headers
-    sprintf(row2, "      24h  3d   7d  ");
+    snprintf(row2, 20, "      24h  3d   7d  ");
     lcd.setCursor(0,1);
     lcd.print(row2);
 
@@ -118,7 +120,7 @@ void loop() {
     int min24hr = arrayMin(hourMin, 24);
     int min3day = arrayMin(dayMin, 3);
     int min7day = arrayMin(dayMin, 7);
-    sprintf(row3, "Min: %3d  %3d  %3d  ", min24hr, min3day, min7day);
+    snprintf(row3, 20, "Min: %3d  %3d  %3d  ", min24hr, min3day, min7day);
     lcd.setCursor(0, 2);
     lcd.print(row3);
     
@@ -126,7 +128,7 @@ void loop() {
     int max24hr = arrayMax(hourMax, 24);
     int max3day = arrayMax(dayMax, 3);
     int max7day = arrayMax(dayMax, 7);
-    sprintf(row4, "Max: %3d  %3d  %3d  ", max24hr, max3day, max7day);
+    snprintf(row4, 20, "Max: %3d  %3d  %3d  ", max24hr, max3day, max7day);
     lcd.setCursor(0, 3);
     lcd.print(row4);
     
@@ -139,10 +141,20 @@ void loop() {
 }
 
 void readSensor() {
-    preciseTemp = bme.readTemperature();
-    currentTemp = (int) (preciseTemp + 0.5); // TODO -0.5 if < 0       
-    currentHumidity = (int)(bme.readHumidity());
-    currentPressure = (int)(bme.readPressure() / 100.0F);
+    float val = bme.readPressure();
+    if(!isnan(val)) {
+      precisePressure = val;
+      currentPressure = int(val / 100.0F);
+    }
+    val = bme.readTemperature();
+    if(!isnan(val) && val > -40 && val < 100) {
+      preciseTemp = val;
+      currentTemp = int(val + (val >= 0 ? 0.5 : -0.5));
+    }
+    val = bme.readHumidity();
+    if(!isnan(val)) {
+      currentHumidity = int(val);
+    }
 }
 
 void updateMaxMin() {
@@ -212,17 +224,17 @@ void incrementBarometer() {
   for(ii=36; ii>=1; ii--) {
     barometer[ii] = barometer[ii-1];
   }
-  barometer[0] = (int)bme.readPressure();
+  barometer[0] = precisePressure;
   // update 0-3 hr trend
   trend03 = 5 + getTrend(barometer[0] - barometer[18]);
   // update 3-6 hr trend
   trend36 = 2 + getTrend(barometer[18] - barometer[36]);
 }
 
-int getTrend(int diff) {
+int getTrend(long diff) {
   if(diff > 200) { // rising pressure
     return 1;
-  } else if(diff < 200) { // falling pressure
+  } else if(diff < -200) { // falling pressure
     return -1;
   } else {
     return 0;
@@ -264,6 +276,21 @@ void debug() {
     int ii;
     for(ii=0; ii<24; ii++) {
       Serial.print(hourMax[ii]);
+      Serial.print(", ");
+    }
+    Serial.println("");
+    for(ii=0; ii<24; ii++) {
+      Serial.print(hourMin[ii]);
+      Serial.print(", ");
+    }
+    Serial.println("");
+    for(ii=0; ii<7; ii++) {
+      Serial.print(dayMax[ii]);
+      Serial.print(", ");
+    }
+    Serial.println("");
+    for(ii=0; ii<7; ii++) {
+      Serial.print(dayMin[ii]);
       Serial.print(", ");
     }
     Serial.println("");
